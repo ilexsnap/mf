@@ -35,7 +35,7 @@ from friend_requests import (
 )
 
 # Tokens
-API_TOKEN = "7916536914:AAHwtvO8hfGl2U4xcfM1fAjMLNypPFEW5JQ"
+API_TOKEN = "7616181573:AAGpdqTwQcepXKXq72x58RABIZbvbE-NXKg"
 
 # Admin user IDs
 ADMIN_USER_IDS = [7405203657, 8060390897, 7575419069]
