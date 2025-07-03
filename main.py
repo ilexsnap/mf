@@ -156,7 +156,12 @@ async def password_command(message: types.Message):
     provided_password = command_text.split()[1]
     if provided_password == TEMP_PASSWORD:
         password_access[user_id] = datetime.now() + timedelta(hours=1)
-        await message.reply("✅ Temporary access granted for 1 hour.")
+        await message.reply(
+            "🔐 <b>Authentication Required</b>\n\n"
+            "Please choose an option to continue:",
+            reply_markup=get_auth_menu(),
+            parse_mode="HTML"
+        )
         await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
     else:
         await message.reply("❌ Incorrect password.")
@@ -169,12 +174,7 @@ async def start_command(message: types.Message):
     current_username = get_user_session(user_id)
     
     if not has_valid_access(user_id):
-        await message.reply(
-            "🔐 <b>Authentication Required</b>\n\n"
-            "Please choose an option to continue:",
-            reply_markup=get_auth_menu(),
-            parse_mode="HTML"
-        )
+        await message.reply("🚫 You are not authorized to use this bot. Use /password to get access.")
         return
     
     state = user_states[user_id]
@@ -198,6 +198,22 @@ async def signup_cmd(message: types.Message):
         return
     await signup_command(message)
 
+@router.message(Command("signin"))
+async def signin_cmd(message: types.Message):
+    if not has_valid_access(message.chat.id):
+        await message.reply("🚫 You are not authorized to use this bot.")
+        return
+    # Trigger signin flow
+    user_id = message.from_user.id
+    from signup import user_signup_states, BACK_TO_SIGNUP
+    user_signup_states[user_id] = {"stage": "signin_email"}
+    await message.answer(
+        "🔐 <b>Sign In</b>\n\n"
+        "Please enter your email address:",
+        reply_markup=BACK_TO_SIGNUP,
+        parse_mode="HTML"
+    )
+
 @router.message(Command("send_lounge_all"))
 async def send_lounge_all(message: types.Message):
     user_id = message.chat.id
@@ -209,7 +225,7 @@ async def send_lounge_all(message: types.Message):
     if len(parts) != 2:
         return await message.reply(
             "ℹ️ <b>Usage</b>\n\n"
-            "<code>/send_lounge_all &lt;message&gt;</code>",
+            "<code>/send_lounge_all <message></code>",
             parse_mode="HTML"
         )
 
@@ -258,7 +274,7 @@ async def lounge_command(message: types.Message):
     if len(command_text.split()) < 2:
         await message.reply(
             "ℹ️ <b>Usage</b>\n\n"
-            "<code>/lounge &lt;message&gt;</code>",
+            "<code>/lounge <message></code>",
             parse_mode="HTML"
         )
         return
@@ -304,7 +320,7 @@ async def send_to_all_command(message: types.Message):
     if len(command_text.split()) < 2:
         await message.reply(
             "ℹ️ <b>Usage</b>\n\n"
-            "<code>/chatroom &lt;message&gt;</code>",
+            "<code>/chatroom <message></code>",
             parse_mode="HTML"
         )
         return
@@ -360,7 +376,7 @@ async def send_chat_all(message: types.Message):
     if len(parts) != 2:
         await message.reply(
             "ℹ️ <b>Usage</b>\n\n"
-            "<code>/send_chat_all &lt;message&gt;</code>",
+            "<code>/send_chat_all <message></code>",
             parse_mode="HTML"
         )
         return
@@ -498,6 +514,37 @@ async def settings_command(message: types.Message):
         reply_markup=get_settings_menu(user_id),
         parse_mode="HTML"
     )
+
+@router.message(Command("add"))
+async def add_person_command(message: types.Message):
+    user_id = message.chat.id
+    if not has_valid_access(user_id):
+        await message.reply("🚫 You are not authorized to use this bot.")
+        return
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.reply("Please provide the person ID. Usage: /add <person_id>")
+        return
+    person_id = args[1]
+    token = get_current_account(user_id)
+    if not token:
+        await message.reply("No active account found. Please set an account first.")
+        return
+    url = f"https://api.meeff.com/user/undoableAnswer/v5/?userId={person_id}&isOkay=1"
+    headers = {"meeff-access-token": token, "Connection": "keep-alive"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                data = await response.json()
+                if data.get("errorCode") == "LikeExceeded":
+                    await message.reply("You've reached the daily like limit.")
+                elif data.get("errorCode"):
+                    await message.reply(f"Failed: {data.get('errorMessage', 'Unknown error')}")
+                else:
+                    await message.reply(f"Successfully added person with ID: {person_id}")
+    except Exception as e:
+        logging.error(f"Error adding person by ID: {e}")
+        await message.reply("An error occurred while trying to add this person.")
 
 @router.message()
 async def handle_new_token(message: types.Message):
@@ -1030,6 +1077,8 @@ async def set_bot_commands():
         BotCommand(command="invoke", description="🔧 Verify and remove disabled accounts"),
         BotCommand(command="skip", description="⏭️ Unsubscribe from all chatrooms"),
         BotCommand(command="signup", description="🆕 Create new Meeff account"),
+        BotCommand(command="signin", description="🔐 Sign in to existing Meeff account"),
+        BotCommand(command="add", description="➕ Manually add a person by ID"),
         BotCommand(command="password", description="🔐 Enter password for temporary access")
     ]
     await bot.set_my_commands(commands)
