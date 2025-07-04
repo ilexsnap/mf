@@ -917,26 +917,25 @@ async def callback_handler(callback_query: CallbackQuery):
             status_emoji = "✅" if is_active else "❌"
             is_current = tok['token'] == current_token
             
-            # Account name row
+            # Account name display: Truncate if too long, add current indicator
+            account_name_display = f"{'🔹' if is_current else '▫️'} {tok['name'][:15]}{'...' if len(tok['name']) > 15 else ''}" 
+
+            # All buttons for this account are now in a single row
             buttons.append([
                 InlineKeyboardButton(
-                    text=f"{'🔹' if is_current else '▫️'} {tok['name'][:20]}",
-                    callback_data=f"set_account_{i}"
-                )
-            ])
-            
-            # Action buttons row
-            buttons.append([
+                    text=account_name_display,
+                    callback_data=f"set_account_{i}" # This button still sets as current
+                ),
                 InlineKeyboardButton(
-                    text=f"{status_emoji} {'Active' if is_active else 'Inactive'}",
+                    text=f"{status_emoji}", # Only emoji for status
                     callback_data=f"toggle_status_{i}"
                 ),
                 InlineKeyboardButton(
-                    text="👁️ View",
+                    text="👁️", # Only emoji for view
                     callback_data=f"view_account_{i}"
                 ),
                 InlineKeyboardButton(
-                    text="🗑️ Delete",
+                    text="🗑️", # Only emoji for delete
                     callback_data=f"confirm_delete_{i}"
                 )
             ])
