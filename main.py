@@ -117,8 +117,8 @@ def get_unsubscribe_menu():
     """Get unsubscribe options menu"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📱 Unsubscribe Current", callback_data="unsub_current"),
-            InlineKeyboardButton(text="🔄 Unsubscribe All", callback_data="unsub_all")
+            InlineKeyboardButton(text="Unsubscribe Current", callback_data="unsub_current"),
+            InlineKeyboardButton(text="Unsubscribe All", callback_data="unsub_all")
         ],
         [InlineKeyboardButton(text="🔙 Back", callback_data="back_to_menu")]
     ])
@@ -137,9 +137,6 @@ start_markup = InlineKeyboardMarkup(inline_keyboard=[
     [
         InlineKeyboardButton(text="🚀 Send Request", callback_data="send_request_menu"),
         InlineKeyboardButton(text="🌍 All Countries", callback_data="all_countries")
-    ],
-    [
-        InlineKeyboardButton(text="⚙️ Settings", callback_data="settings_menu")
     ]
 ])
 
@@ -1199,17 +1196,16 @@ async def callback_handler(callback_query: CallbackQuery):
 async def set_bot_commands():
     commands = [
         BotCommand(command="start", description="🎯 Start the bot"),
-        BotCommand(command="settings", description="⚙️ Access bot settings"),
         BotCommand(command="lounge", description="💬 Send message in the lounge"),
-        BotCommand(command="chatroom", description="📨 Send message in chatrooms"),
         BotCommand(command="send_lounge_all", description="🔄 Send lounge message to ALL accounts"),
+        BotCommand(command="chatroom", description="📨 Send message in chatrooms"),
         BotCommand(command="send_chat_all", description="🔄 Send chatroom message to ALL accounts"),
         BotCommand(command="invoke", description="🔧 Verify and remove disabled accounts"),
         BotCommand(command="skip", description="⏭️ Unsubscribe from all chatrooms"),
         BotCommand(command="signup", description="🆕 Create new Meeff account"),
-        BotCommand(command="signin", description="🔐 Sign in to existing Meeff account"),
+        BotCommand(command="settings", description="⚙️ Access bot settings"),
         BotCommand(command="add", description="➕ Manually add a person by ID"),
-        BotCommand(command="password", description="🔐 Enter password for temporary access")
+        BotCommand(command="password", description="🔐Enter password for temporary access")
     ]
     await bot.set_my_commands(commands)
 
