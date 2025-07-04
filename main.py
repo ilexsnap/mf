@@ -89,10 +89,10 @@ def get_settings_menu(user_id):
         ],
         [
             InlineKeyboardButton(text="🗄️ DB Settings", callback_data="db_settings"),
-            InlineKeyboardButton(text="🆕 Sign Up", callback_data="signup_go")
+         #   InlineKeyboardButton(text="🆕 Sign Up", callback_data="signup_go")
         ],
         [
-            InlineKeyboardButton(text="🔐 Sign In", callback_data="signin_go"),
+         #   InlineKeyboardButton(text="🔐 Sign In", callback_data="signin_go"),
             InlineKeyboardButton(text="🔙 Back", callback_data="back_to_menu")
         ]
     ]
@@ -1202,9 +1202,10 @@ async def set_bot_commands():
         BotCommand(command="send_chat_all", description="🔄 Send chatroom message to ALL accounts"),
         BotCommand(command="invoke", description="🔧 Verify and remove disabled accounts"),
         BotCommand(command="skip", description="⏭️ Unsubscribe from all chatrooms"),
-        BotCommand(command="signup", description="🆕 Create new Meeff account"),
         BotCommand(command="settings", description="⚙️ Access bot settings"),
         BotCommand(command="add", description="➕ Manually add a person by ID"),
+        BotCommand(command="signup", description="🆕 Create new Meeff account"),
+        BotCommand(command="signin", description="🔐 Sign in to existing Meeff account"),
         BotCommand(command="password", description="🔐Enter password for temporary access")
     ]
     await bot.set_my_commands(commands)
