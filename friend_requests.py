@@ -92,6 +92,18 @@ def format_user(user):
         "Photos: " + ' '.join([f"<a href='{html.escape(url)}'>Photo</a>" for url in user.get('photoUrls', [])])
     )
 
+def format_time_used(start_time, end_time):
+    delta = end_time - start_time
+    total_seconds = int(delta.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
+
 async def process_users(session, users, token, user_id, bot, target_channel_id, token_name=None, token_status=None):
     """Process a batch of users and send friend requests.
     Works with both run_requests and process_all_tokens functions.
