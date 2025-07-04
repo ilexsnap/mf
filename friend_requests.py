@@ -178,41 +178,41 @@ async def process_users(session, users, token, user_id, bot, target_channel_id, 
                     limit_reached = True
                     break
 
-            # Add to sent IDs if spam filter is enabled
-            if get_spam_filter(user_id):
-                add_sent_id(user_id, "request", user["_id"])
+                # Add to sent IDs if spam filter is enabled
+                if get_spam_filter(user_id):
+                    add_sent_id(user_id, "request", user["_id"])
 
-            # Format and send user details
-            details = format_user_details(user)
-            await bot.send_message(chat_id=user_id, text=details, parse_mode="HTML")
-            
-            # Update counters
-            added_count += 1
-            state["total_added_friends"] += 1
+                # Format and send user details
+                details = format_user(user) # CHANGED THIS LINE
+                await bot.send_message(chat_id=user_id, text=details, parse_mode="HTML")
+                
+                # Update counters
+                added_count += 1
+                state["total_added_friends"] += 1
 
-            # Update status message based on which function called this
-            if token_status and token_name in token_status:
-                # For process_all_tokens
-                current = token_status[token_name]
-                token_status[token_name] = (current[0] + 1, current[1], "Processing")
-            else:
-                # For run_requests
-                if state["running"] and state["status_message_id"]:
-                    try:
-                        await bot.edit_message_text(
-                            chat_id=user_id,
-                            message_id=state["status_message_id"],
-                            text=f"{token_name}: Friend request sending: {state['total_added_friends']}",
-                            reply_markup=stop_markup
-                        )
-                    except Exception as e:
-                        # Ignore "message is not modified" errors
-                        if "message is not modified" not in str(e):
-                            logging.error(f"Error updating status message: {e}")
+                # Update status message based on which function called this
+                if token_status and token_name in token_status:
+                    # For process_all_tokens
+                    current = token_status[token_name]
+                    token_status[token_name] = (current[0] + 1, current[1], "Processing")
+                else:
+                    # For run_requests
+                    if state["running"] and state["status_message_id"]:
+                        try:
+                            await bot.edit_message_text(
+                                chat_id=user_id,
+                                message_id=state["status_message_id"],
+                                text=f"{token_name}: Friend request sending: {state['total_added_friends']}",
+                                reply_markup=stop_markup
+                            )
+                        except Exception as e:
+                            # Ignore "message is not modified" errors
+                            if "message is not modified" not in str(e):
+                                logging.error(f"Error updating status message: {e}")
 
-            # Apply delay after processing each user
-            await asyncio.sleep(PER_USER_DELAY)
-            
+                # Apply delay after processing each user
+                await asyncio.sleep(PER_USER_DELAY)
+                
         except Exception as e:
             logging.error(f"Error processing user with {token_name}: {e}")
             await asyncio.sleep(1)  # Short delay after error
