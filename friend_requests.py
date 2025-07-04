@@ -50,15 +50,45 @@ async def fetch_users(session, token):
         logging.error(f"Fetch users failed: {e}")
         return []
 
-def format_user_details(user):
-    """Format user details for display"""
+def format_user(user):
+    def time_ago(dt_str):
+        if not dt_str:
+            return "N/A"
+        try:
+            dt = parser.isoparse(dt_str)
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            diff = now - dt
+            minutes = int(diff.total_seconds() // 60)
+            if minutes < 1:
+                return "just now"
+            elif minutes < 60:
+                return f"{minutes} min ago"
+            hours = minutes // 60
+            if hours < 24:
+                return f"{hours} hr ago"
+            days = hours // 24
+            return f"{days} day(s) ago"
+        except Exception:
+            return "unknown"
+    last_active = time_ago(user.get("recentAt"))
+    nationality = html.escape(user.get('nationalityCode', 'N/A'))
+    height = html.escape(str(user.get('height', 'N/A')))
+    if "|" in height:
+        height_val, height_unit = height.split("|", 1)
+        height = f"{height_val.strip()} {height_unit.strip()}"
     return (
-        f"<b>User ID:</b> {html.escape(str(user['_id']))}\n"
         f"<b>Name:</b> {html.escape(user.get('name', 'N/A'))}\n"
+        f"<b>ID:</b> <code>{html.escape(user.get('_id', 'N/A'))}</code>\n"
+        f"<b>Nationality:</b> {nationality}\n"
+        f"<b>Height:</b> {height}\n"
         f"<b>Description:</b> {html.escape(user.get('description', 'N/A'))}\n"
         f"<b>Birth Year:</b> {html.escape(str(user.get('birthYear', 'N/A')))}\n"
+        f"<b>Platform:</b> {html.escape(user.get('platform', 'N/A'))}\n"
+        f"<b>Profile Score:</b> {html.escape(str(user.get('profileScore', 'N/A')))}\n"
         f"<b>Distance:</b> {html.escape(str(user.get('distance', 'N/A')))} km\n"
         f"<b>Language Codes:</b> {html.escape(', '.join(user.get('languageCodes', [])))}\n"
+        f"<b>Last Active:</b> {last_active}\n"
         "Photos: " + ' '.join([f"<a href='{html.escape(url)}'>Photo</a>" for url in user.get('photoUrls', [])])
     )
 
