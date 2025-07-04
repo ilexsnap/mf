@@ -5,83 +5,235 @@ import datetime
 client = MongoClient("mongodb+srv://irexanon:xUf7PCf9cvMHy8g6@rexdb.d9rwo.mongodb.net/?retryWrites=true&w=majority&appName=RexDB")
 db = client.meeff_bot
 
-# Username-based authentication system
-USER_SESSIONS = {}  # {telegram_user_id: username}
-
-def set_user_session(telegram_user_id, username):
-    """Set the current username session for a telegram user"""
-    USER_SESSIONS[telegram_user_id] = username
-
-def get_user_session(telegram_user_id):
-    """Get the current username session for a telegram user"""
-    return USER_SESSIONS.get(telegram_user_id)
-
-def clear_user_session(telegram_user_id):
-    """Clear the current username session"""
-    if telegram_user_id in USER_SESSIONS:
-        del USER_SESSIONS[telegram_user_id]
-
-def create_username_collection(username):
-    """Create a new collection for a username"""
-    collection_name = f"user_{username}"
-    user_db = db[collection_name]
-    
-    # Initialize with basic structure
-    if user_db.count_documents({}) == 0:
-        user_db.insert_one({"type": "metadata", "created_at": datetime.datetime.utcnow(), "username": username})
-        user_db.insert_one({"type": "tokens", "items": []})
-        user_db.insert_one({"type": "settings", "current_token": None, "spam_filter": False})
-        user_db.insert_one({"type": "sent_records", "data": {}})
-        user_db.insert_one({"type": "filters", "data": {}})
-        user_db.insert_one({"type": "info_cards", "data": {}})
-    return True
-
-def username_exists(username):
-    """Check if a username collection already exists"""
-    collection_name = f"user_{username}"
-    return collection_name in db.list_collection_names()
-
-def list_usernames():
-    """List all available usernames"""
-    collection_names = db.list_collection_names()
-    usernames = []
-    for name in collection_names:
-        if name.startswith("user_") and name != "user_":
-            username = name[5:]  # Remove "user_" prefix
-            usernames.append(username)
-    return usernames
-
-# Helper function to get a user's collection based on session
+# Helper function to get a user's collection
 def _get_user_collection(telegram_user_id):
-    """Get the collection for the current user session"""
-    username = get_user_session(telegram_user_id)
-    if not username:
-        return None
-    
-    collection_name = f"user_{username}"
-    if collection_name not in db.list_collection_names():
-        return None
-    
+    """Get the collection for a user"""
+    collection_name = f"user_{telegram_user_id}"
     return db[collection_name]
 
 # Helper function to ensure collection exists with basic structure
 def _ensure_user_collection_exists(telegram_user_id):
     """Make sure user collection exists with default documents"""
     user_db = _get_user_collection(telegram_user_id)
-    if not user_db:
-        return False
-
+    
     # Check if the collection is empty
     if user_db.count_documents({}) == 0:
-        username = get_user_session(telegram_user_id)
         # Initialize with basic structure
-        user_db.insert_one({"type": "metadata", "created_at": datetime.datetime.utcnow(), "username": username})
+        user_db.insert_one({"type": "metadata", "created_at": datetime.datetime.utcnow(), "user_id": telegram_user_id})
         user_db.insert_one({"type": "tokens", "items": []})
         user_db.insert_one({"type": "settings", "current_token": None, "spam_filter": False})
         user_db.insert_one({"type": "sent_records", "data": {}})
         user_db.insert_one({"type": "filters", "data": {}})
         user_db.insert_one({"type": "info_cards", "data": {}})
     return True
+
+# Enhanced DB Collection Management Functions
+def list_all_collections():
+    """List all user collections with detailed data summary"""
+    collection_names = db.list_collection_names()
+    user_collections = []
+    
+    for name in collection_names:
+        if name.startswith("user_") and name != "user_":
+            try:
+                user_id = name[5:]  # Remove "user_" prefix
+                summary = get_collection_summary(name)
+                user_collections.append({
+                    "collection_name": name,
+                    "user_id": user_id,
+                    "display_name": f"user_{user_id}",
+                    "summary": summary
+                })
+            except Exception as e:
+                print(f"Error processing collection {name}: {e}")
+                continue
+    
+    return sorted(user_collections, key=lambda x: x.get("summary", {}).get("created_at") or datetime.datetime.min, reverse=True)
+
+def get_collection_summary(collection_name):
+    """Get detailed summary of data in a collection"""
+    try:
+        collection = db[collection_name]
+        
+        # Get tokens count and details
+        tokens_doc = collection.find_one({"type": "tokens"})
+        tokens_count = 0
+        active_tokens = 0
+        if tokens_doc and "items" in tokens_doc:
+            tokens_count = len(tokens_doc["items"])
+            active_tokens = sum(1 for token in tokens_doc["items"] if token.get("active", True))
+        
+        # Get sent records count by category
+        sent_doc = collection.find_one({"type": "sent_records"})
+        sent_records = {"total": 0, "categories": {}}
+        if sent_doc and "data" in sent_doc:
+            for category, ids in sent_doc["data"].items():
+                count = len(ids) if isinstance(ids, list) else 0
+                sent_records["categories"][category] = count
+                sent_records["total"] += count
+        
+        # Get info cards count
+        info_doc = collection.find_one({"type": "info_cards"})
+        info_cards_count = len(info_doc.get("data", {})) if info_doc else 0
+        
+        # Get settings
+        settings_doc = collection.find_one({"type": "settings"})
+        current_token = settings_doc.get("current_token") if settings_doc else None
+        spam_filter = settings_doc.get("spam_filter", False) if settings_doc else False
+        
+        # Get creation date
+        metadata_doc = collection.find_one({"type": "metadata"})
+        created_at = metadata_doc.get("created_at") if metadata_doc else None
+        
+        return {
+            "tokens_count": tokens_count,
+            "active_tokens": active_tokens,
+            "sent_records": sent_records,
+            "info_cards_count": info_cards_count,
+            "has_current_token": bool(current_token),
+            "current_token_preview": current_token[:10] + "..." if current_token else None,
+            "spam_filter_enabled": spam_filter,
+            "created_at": created_at,
+            "total_documents": collection.count_documents({})
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+def connect_to_collection(collection_name, target_user_id):
+    """Connect to existing collection by transferring all data"""
+    try:
+        # Check if source collection exists
+        if collection_name not in db.list_collection_names():
+            return False, f"Collection '{collection_name}' not found"
+        
+        # Ensure target collection exists
+        _ensure_user_collection_exists(target_user_id)
+        
+        from_collection = db[collection_name]
+        to_collection = _get_user_collection(target_user_id)
+        
+        # Get all documents from source collection
+        all_docs = list(from_collection.find({}))
+        
+        if not all_docs:
+            return False, "Source collection is empty"
+        
+        # Clear target collection first
+        to_collection.delete_many({})
+        
+        # Update metadata for target collection
+        for doc in all_docs:
+            if doc.get("type") == "metadata":
+                doc["user_id"] = target_user_id
+                doc["connected_at"] = datetime.datetime.utcnow()
+                doc["original_collection"] = collection_name
+        
+        # Insert all documents to target collection
+        to_collection.insert_many(all_docs)
+        
+        return True, f"Successfully connected to '{collection_name}' with {len(all_docs)} documents"
+        
+    except Exception as e:
+        return False, f"Connection failed: {str(e)}"
+
+def rename_user_collection(user_id, new_collection_name):
+    """Rename a user's collection"""
+    try:
+        old_collection_name = f"user_{user_id}"
+        
+        # Check if old collection exists
+        if old_collection_name not in db.list_collection_names():
+            return False, "Your collection not found"
+        
+        # Validate new collection name
+        if not new_collection_name.startswith("user_"):
+            new_collection_name = f"user_{new_collection_name}"
+        
+        # Check if new collection name already exists
+        if new_collection_name in db.list_collection_names():
+            return False, "Target collection name already exists"
+        
+        # Get all documents from old collection
+        old_collection = db[old_collection_name]
+        all_docs = list(old_collection.find({}))
+        
+        if not all_docs:
+            return False, "Your collection is empty"
+        
+        # Create new collection and insert documents
+        new_collection = db[new_collection_name]
+        
+        # Update metadata
+        for doc in all_docs:
+            if doc.get("type") == "metadata":
+                doc["renamed_at"] = datetime.datetime.utcnow()
+                doc["original_name"] = old_collection_name
+        
+        new_collection.insert_many(all_docs)
+        
+        # Delete old collection
+        old_collection.drop()
+        
+        return True, f"Successfully renamed to '{new_collection_name}'"
+        
+    except Exception as e:
+        return False, f"Rename failed: {str(e)}"
+
+def transfer_to_user(from_user_id, to_user_id):
+    """Transfer all data from one user to another"""
+    try:
+        from_collection_name = f"user_{from_user_id}"
+        
+        # Check if source collection exists
+        if from_collection_name not in db.list_collection_names():
+            return False, "Your collection not found"
+        
+        # Ensure target collection exists
+        _ensure_user_collection_exists(to_user_id)
+        
+        from_collection = db[from_collection_name]
+        to_collection = _get_user_collection(to_user_id)
+        
+        # Get all documents from source collection
+        all_docs = list(from_collection.find({}))
+        
+        if not all_docs:
+            return False, "Your collection is empty"
+        
+        # Clear target collection first
+        to_collection.delete_many({})
+        
+        # Update metadata for target collection
+        for doc in all_docs:
+            if doc.get("type") == "metadata":
+                doc["user_id"] = to_user_id
+                doc["transferred_at"] = datetime.datetime.utcnow()
+                doc["transferred_from"] = from_user_id
+        
+        # Insert all documents to target collection
+        to_collection.insert_many(all_docs)
+        
+        return True, f"Successfully transferred {len(all_docs)} documents to user {to_user_id}"
+        
+    except Exception as e:
+        return False, f"Transfer failed: {str(e)}"
+
+def get_current_collection_info(user_id):
+    """Get current user's collection information"""
+    collection_name = f"user_{user_id}"
+    if collection_name in db.list_collection_names():
+        summary = get_collection_summary(collection_name)
+        return {
+            "collection_name": collection_name,
+            "exists": True,
+            "summary": summary
+        }
+    else:
+        return {
+            "collection_name": collection_name,
+            "exists": False,
+            "summary": None
+        }
 
 # Info card functions
 def set_info_card(telegram_user_id, token, info_text, email=None):
@@ -257,14 +409,14 @@ def list_tokens():
     user_collections = [name for name in collection_names if name.startswith("user_")]
 
     for collection_name in user_collections:
-        username = collection_name.split("_", 1)[1]  # Extract username from collection name
+        user_id = collection_name.split("_", 1)[1]  # Extract user ID from collection name
         user_db = db[collection_name]
 
         tokens_doc = user_db.find_one({"type": "tokens"})
         if tokens_doc:
             for token in tokens_doc.get("items", []):
                 result.append({
-                    "username": username,
+                    "user_id": user_id,
                     "token": token.get("token"),
                     "name": token.get("name")
                 })
@@ -460,11 +612,7 @@ async def bulk_add_sent_ids(telegram_user_id, category, target_ids):
 
 async def has_valid_access(telegram_user_id):
     """Check if user has valid access to use the bot"""
-    username = get_user_session(telegram_user_id)
-    if not username:
-        return False
-    
-    collection_name = f"user_{username}"
+    collection_name = f"user_{telegram_user_id}"
     if collection_name not in db.list_collection_names():
         return False
     
@@ -481,15 +629,7 @@ def get_message_delay(telegram_user_id):
 
 def transfer_user_data(from_telegram_id, to_telegram_id):
     """Transfer all user data from one telegram user to another"""
-    from_username = get_user_session(from_telegram_id)
-    if not from_username:
-        return False
-    
-    # For now, we'll just transfer the session
-    # In a real implementation, you might want to copy the entire collection
-    set_user_session(to_telegram_id, from_username)
-    clear_user_session(from_telegram_id)
-    return True
+    return transfer_to_user(from_telegram_id, to_telegram_id)
 
 # Legacy functions for backward compatibility
 def has_interacted(telegram_user_id, action_type, user_token):

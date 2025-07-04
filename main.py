@@ -15,9 +15,9 @@ from db import (
     set_user_filters, get_user_filters, set_spam_filter, get_spam_filter, 
     is_already_sent, add_sent_id, toggle_token_status, get_active_tokens, 
     get_token_status, set_account_active, get_info_card,
-    # Username-based authentication
-    set_user_session, get_user_session, clear_user_session, 
-    create_username_collection, username_exists, list_usernames
+    # New DB management functions
+    list_all_collections, get_collection_summary, connect_to_collection,
+    rename_user_collection, transfer_to_user, get_current_collection_info
 )
 from lounge import send_lounge
 from chatroom import send_message_to_everyone
@@ -48,8 +48,8 @@ TEMP_PASSWORD = "11223344"
 
 TARGET_CHANNEL_ID = -1002610862940
 
-# Username authentication states
-username_auth_states = {}
+# DB operation states
+db_operation_states = {}
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -67,27 +67,14 @@ def has_valid_access(user_id):
         return True
     if user_id in password_access and password_access[user_id] > datetime.now():
         return True
-    # Check if user has active username session
-    if get_user_session(user_id):
-        return True
     return False
 
-def get_auth_menu():
-    """Get the authentication menu for username login"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🆕 Start New", callback_data="auth_start_new"),
-            InlineKeyboardButton(text="🔐 Login", callback_data="auth_login")
-        ]
-    ])
-
 def get_settings_menu(user_id):
-    """Generate the enhanced settings menu markup with mobile-friendly design"""
+    """Generate the enhanced settings menu markup"""
     if user_id not in user_states:
         user_states[user_id] = {}
     
     spam_on = get_spam_filter(user_id)
-    current_username = get_user_session(user_id)
     
     buttons = [
         [
@@ -101,21 +88,49 @@ def get_settings_menu(user_id):
             )
         ],
         [
-            InlineKeyboardButton(text="🆕 Sign Up", callback_data="signup_go"),
-            InlineKeyboardButton(text="🔐 Sign In", callback_data="signin_go")
+            InlineKeyboardButton(text="🗄️ DB Settings", callback_data="db_settings"),
+            InlineKeyboardButton(text="🆕 Sign Up", callback_data="signup_go")
+        ],
+        [
+            InlineKeyboardButton(text="🔐 Sign In", callback_data="signin_go"),
+            InlineKeyboardButton(text="🔙 Back", callback_data="back_to_menu")
         ]
     ]
     
-    if current_username:
-        buttons.append([
-            InlineKeyboardButton(text="🚪 Logout", callback_data="auth_logout")
-        ])
-    
-    buttons.append([
-        InlineKeyboardButton(text="🔙 Back", callback_data="back_to_menu")
-    ])
-    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_db_settings_menu():
+    """Get DB settings menu"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔗 Connect DB", callback_data="db_connect"),
+            InlineKeyboardButton(text="📝 Rename DB", callback_data="db_rename")
+        ],
+        [
+            InlineKeyboardButton(text="👁️ View DB", callback_data="db_view"),
+            InlineKeyboardButton(text="📤 Transfer DB", callback_data="db_transfer")
+        ],
+        [InlineKeyboardButton(text="🔙 Back", callback_data="settings_menu")]
+    ])
+
+def get_unsubscribe_menu():
+    """Get unsubscribe options menu"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📱 Unsubscribe Current", callback_data="unsub_current"),
+            InlineKeyboardButton(text="🔄 Unsubscribe All", callback_data="unsub_all")
+        ],
+        [InlineKeyboardButton(text="🔙 Back", callback_data="back_to_menu")]
+    ])
+
+def get_confirmation_menu(action_type):
+    """Get confirmation menu for actions"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Yes", callback_data=f"confirm_{action_type}"),
+            InlineKeyboardButton(text="❌ Cancel", callback_data="back_to_menu")
+        ]
+    ])
 
 # Enhanced mobile-friendly keyboards
 start_markup = InlineKeyboardMarkup(inline_keyboard=[
@@ -156,12 +171,7 @@ async def password_command(message: types.Message):
     provided_password = command_text.split()[1]
     if provided_password == TEMP_PASSWORD:
         password_access[user_id] = datetime.now() + timedelta(hours=1)
-        await message.reply(
-            "🔐 <b>Authentication Required</b>\n\n"
-            "Please choose an option to continue:",
-            reply_markup=get_auth_menu(),
-            parse_mode="HTML"
-        )
+        await message.reply("🔐 Access granted for one hour.")
         await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
     else:
         await message.reply("❌ Incorrect password.")
@@ -170,18 +180,12 @@ async def password_command(message: types.Message):
 async def start_command(message: types.Message):
     user_id = message.chat.id
     
-    # Check if user has username session
-    current_username = get_user_session(user_id)
-    
     if not has_valid_access(user_id):
         await message.reply("🚫 You are not authorized to use this bot. Use /password to get access.")
         return
     
     state = user_states[user_id]
-    welcome_text = "🎯 <b>Meeff Bot Dashboard</b>\n\n"
-    if current_username:
-        welcome_text += f"👤 Logged in as: <code>{current_username}</code>\n\n"
-    welcome_text += "Choose an option below to get started:"
+    welcome_text = "🎯 <b>Meeff Bot Dashboard</b>\n\nChoose an option below to get started:"
     
     status = await message.answer(
         welcome_text,
@@ -211,6 +215,20 @@ async def signin_cmd(message: types.Message):
         "🔐 <b>Sign In</b>\n\n"
         "Please enter your email address:",
         reply_markup=BACK_TO_SIGNUP,
+        parse_mode="HTML"
+    )
+
+@router.message(Command("skip"))
+async def skip_command(message: types.Message):
+    user_id = message.chat.id
+    if not has_valid_access(user_id):
+        await message.reply("🚫 You are not authorized to use this bot.")
+        return
+    
+    await message.answer(
+        "⏭️ <b>Unsubscribe Options</b>\n\n"
+        "Choose which accounts to unsubscribe from chatrooms:",
+        reply_markup=get_unsubscribe_menu(),
         parse_mode="HTML"
     )
 
@@ -417,24 +435,6 @@ async def send_chat_all(message: types.Message):
         )
         logging.error(f"Error in /send_chat_all command: {str(e)}")
 
-@router.message(Command("skip"))
-async def unsubscribe_all_command(message: types.Message):
-    user_id = message.chat.id
-    if not has_valid_access(user_id):
-        await message.reply("🚫 You are not authorized to use this bot.")
-        return
-    token = get_current_account(user_id)
-    if not token:
-        await message.reply("🔍 No active account found. Please set an account before unsubscribing.")
-        return
-
-    status_message = await message.reply(
-        "⏳ <b>Unsubscribing from Chatrooms</b>\n\n"
-        "🔄 Fetching chatrooms and unsubscribing...",
-        parse_mode="HTML"
-    )
-    await unsubscribe_everyone(token, status_message=status_message, bot=bot, chat_id=user_id)
-
 @router.message(Command("invoke"))
 async def invoke_command(message: types.Message):
     user_id = message.chat.id
@@ -503,11 +503,7 @@ async def settings_command(message: types.Message):
         await message.reply("🚫 You are not authorized to use this bot.")
         return
     
-    current_username = get_user_session(user_id)
-    settings_text = "⚙️ <b>Settings Menu</b>\n\n"
-    if current_username:
-        settings_text += f"👤 Current profile: <code>{current_username}</code>\n\n"
-    settings_text += "Choose an option below:"
+    settings_text = "⚙️ <b>Settings Menu</b>\n\nChoose an option below:"
     
     await message.reply(
         settings_text,
@@ -559,48 +555,80 @@ async def handle_new_token(message: types.Message):
     if await signup_message_handler(message):
         return
 
-    # Handle username authentication
-    if user_id in username_auth_states:
-        state = username_auth_states[user_id]
+    # Handle DB operation states
+    if user_id in db_operation_states:
+        state = db_operation_states[user_id]
         
-        if state.get("stage") == "ask_username_new":
-            username = message.text.strip()
-            if not username or len(username) < 3:
-                await message.reply("❌ Username must be at least 3 characters long.")
-                return
+        if state.get("operation") == "connect_db":
+            collection_name = message.text.strip()
+            if not collection_name.startswith("user_"):
+                collection_name = f"user_{collection_name}"
             
-            if username_exists(username):
-                await message.reply(f"❌ Username '{username}' already exists. Please choose another.")
-                return
-            
-            # Create new username collection
-            create_username_collection(username)
-            set_user_session(user_id, username)
-            del username_auth_states[user_id]
-            
-            await message.reply(
-                f"✅ <b>Profile Created</b>\n\n"
-                f"Welcome! Your profile '<code>{username}</code>' has been created.\n\n"
-                f"You can now use the bot. Use /start to begin.",
+            processing_msg = await message.reply(
+                "🔄 <b>Connecting to DB</b>\n\nPlease wait...",
                 parse_mode="HTML"
             )
+            
+            success, msg = connect_to_collection(collection_name, user_id)
+            if success:
+                await processing_msg.edit_text(
+                    f"✅ <b>DB Connected Successfully</b>\n\n{msg}",
+                    parse_mode="HTML"
+                )
+            else:
+                await processing_msg.edit_text(
+                    f"❌ <b>Connection Failed</b>\n\n{msg}",
+                    parse_mode="HTML"
+                )
+            del db_operation_states[user_id]
             return
             
-        elif state.get("stage") == "ask_username_login":
-            username = message.text.strip()
-            if not username_exists(username):
-                await message.reply(f"❌ Username '{username}' not found. Please try again or create a new profile.")
-                return
+        elif state.get("operation") == "rename_db":
+            new_name = message.text.strip()
             
-            set_user_session(user_id, username)
-            del username_auth_states[user_id]
-            
-            await message.reply(
-                f"✅ <b>Logged In</b>\n\n"
-                f"Welcome back to profile '<code>{username}</code>'!\n\n"
-                f"Use /start to continue.",
+            processing_msg = await message.reply(
+                "🔄 <b>Renaming DB</b>\n\nPlease wait...",
                 parse_mode="HTML"
             )
+            
+            success, msg = rename_user_collection(user_id, new_name)
+            if success:
+                await processing_msg.edit_text(
+                    f"✅ <b>DB Renamed Successfully</b>\n\n{msg}",
+                    parse_mode="HTML"
+                )
+            else:
+                await processing_msg.edit_text(
+                    f"❌ <b>Rename Failed</b>\n\n{msg}",
+                    parse_mode="HTML"
+                )
+            del db_operation_states[user_id]
+            return
+            
+        elif state.get("operation") == "transfer_db":
+            try:
+                target_user_id = int(message.text.strip())
+            except ValueError:
+                await message.reply("❌ Invalid user ID. Please enter a valid number.")
+                return
+            
+            processing_msg = await message.reply(
+                "🔄 <b>Transferring DB</b>\n\nPlease wait...",
+                parse_mode="HTML"
+            )
+            
+            success, msg = transfer_to_user(user_id, target_user_id)
+            if success:
+                await processing_msg.edit_text(
+                    f"✅ <b>DB Transferred Successfully</b>\n\n{msg}",
+                    parse_mode="HTML"
+                )
+            else:
+                await processing_msg.edit_text(
+                    f"❌ <b>Transfer Failed</b>\n\n{msg}",
+                    parse_mode="HTML"
+                )
+            del db_operation_states[user_id]
             return
 
     if not has_valid_access(user_id):
@@ -671,48 +699,6 @@ async def callback_handler(callback_query: CallbackQuery):
     if await signup_callback_handler(callback_query):
         return
 
-    # Handle username authentication
-    if data == "auth_start_new":
-        username_auth_states[user_id] = {"stage": "ask_username_new"}
-        await callback_query.message.edit_text(
-            "🆕 <b>Create New Profile</b>\n\n"
-            "Please enter a username for your new profile (minimum 3 characters):",
-            parse_mode="HTML"
-        )
-        return
-        
-    elif data == "auth_login":
-        usernames = list_usernames()
-        if not usernames:
-            await callback_query.message.edit_text(
-                "❌ <b>No Profiles Found</b>\n\n"
-                "No profiles exist yet. Please create a new profile first.",
-                reply_markup=get_auth_menu(),
-                parse_mode="HTML"
-            )
-            return
-            
-        username_auth_states[user_id] = {"stage": "ask_username_login"}
-        username_list = "\n".join([f"• <code>{u}</code>" for u in usernames[:10]])
-        await callback_query.message.edit_text(
-            f"🔐 <b>Login to Profile</b>\n\n"
-            f"Available profiles:\n{username_list}\n\n"
-            f"Please enter the username you want to login to:",
-            parse_mode="HTML"
-        )
-        return
-        
-    elif data == "auth_logout":
-        current_username = get_user_session(user_id)
-        clear_user_session(user_id)
-        await callback_query.message.edit_text(
-            f"🚪 <b>Logged Out</b>\n\n"
-            f"You have been logged out from profile '<code>{current_username}</code>'.\n\n"
-            f"Use /start to login again.",
-            parse_mode="HTML"
-        )
-        return
-
     if not has_valid_access(user_id):
         await callback_query.answer("🚫 You are not authorized to use this bot.")
         return
@@ -720,6 +706,163 @@ async def callback_handler(callback_query: CallbackQuery):
     if user_id not in user_states:
         user_states[user_id] = {}
     state = user_states[user_id]
+
+    # DB Settings callbacks
+    if data == "db_settings":
+        current_info = get_current_collection_info(user_id)
+        info_text = "🗄️ <b>Database Settings</b>\n\n"
+        
+        if current_info["exists"]:
+            summary = current_info["summary"]
+            info_text += (
+                f"📊 <b>Current DB:</b> <code>{current_info['collection_name']}</code>\n"
+                f"👤 Accounts: <code>{summary.get('tokens_count', 0)}</code>\n"
+                f"📝 Sent Records: <code>{summary.get('sent_records', {}).get('total', 0)}</code>\n"
+                f"🛡️ Spam Filter: {'ON' if summary.get('spam_filter_enabled') else 'OFF'}\n\n"
+            )
+        else:
+            info_text += "❌ No database found for your account.\n\n"
+        
+        info_text += "Choose an option below:"
+        
+        await callback_query.message.edit_text(
+            info_text,
+            reply_markup=get_db_settings_menu(),
+            parse_mode="HTML"
+        )
+        return
+
+    elif data == "db_connect":
+        db_operation_states[user_id] = {"operation": "connect_db"}
+        await callback_query.message.edit_text(
+            "🔗 <b>Connect to Database</b>\n\n"
+            "Enter the collection name you want to connect to:\n"
+            "(e.g., user_123456 or just 123456)",
+            parse_mode="HTML"
+        )
+        return
+
+    elif data == "db_rename":
+        db_operation_states[user_id] = {"operation": "rename_db"}
+        await callback_query.message.edit_text(
+            "📝 <b>Rename Database</b>\n\n"
+            "Enter the new name for your database collection:",
+            parse_mode="HTML"
+        )
+        return
+
+    elif data == "db_view":
+        collections = list_all_collections()
+        if not collections:
+            await callback_query.message.edit_text(
+                "❌ <b>No Collections Found</b>\n\n"
+                "No user collections exist in the database.",
+                reply_markup=get_db_settings_menu(),
+                parse_mode="HTML"
+            )
+            return
+
+        view_text = "👁️ <b>All Database Collections</b>\n\n"
+        for i, col in enumerate(collections[:10], 1):  # Show first 10
+            summary = col["summary"]
+            accounts = summary.get("tokens_count", 0)
+            created = summary.get("created_at")
+            created_str = created.strftime("%Y-%m-%d") if created else "Unknown"
+            
+            view_text += (
+                f"<b>{i}.</b> <code>{col['collection_name']}</code>\n"
+                f"   👤 Accounts: {accounts} | 📅 Created: {created_str}\n\n"
+            )
+
+        if len(collections) > 10:
+            view_text += f"... and {len(collections) - 10} more collections"
+
+        await callback_query.message.edit_text(
+            view_text,
+            reply_markup=get_db_settings_menu(),
+            parse_mode="HTML"
+        )
+        return
+
+    elif data == "db_transfer":
+        db_operation_states[user_id] = {"operation": "transfer_db"}
+        await callback_query.message.edit_text(
+            "📤 <b>Transfer Database</b>\n\n"
+            "Enter the Telegram user ID to transfer your database to:",
+            parse_mode="HTML"
+        )
+        return
+
+    # Unsubscribe callbacks
+    elif data == "unsub_current":
+        await callback_query.message.edit_text(
+            "⚠️ <b>Confirm Unsubscribe Current</b>\n\n"
+            "Are you sure you want to unsubscribe the current account from all chatrooms?",
+            reply_markup=get_confirmation_menu("unsub_current"),
+            parse_mode="HTML"
+        )
+        return
+
+    elif data == "unsub_all":
+        active_tokens = get_active_tokens(user_id)
+        await callback_query.message.edit_text(
+            f"⚠️ <b>Confirm Unsubscribe All</b>\n\n"
+            f"Are you sure you want to unsubscribe ALL {len(active_tokens)} active accounts from chatrooms?",
+            reply_markup=get_confirmation_menu("unsub_all"),
+            parse_mode="HTML"
+        )
+        return
+
+    elif data == "confirm_unsub_current":
+        token = get_current_account(user_id)
+        if not token:
+            await callback_query.message.edit_text(
+                "❌ No active account found.",
+                reply_markup=back_markup,
+                parse_mode="HTML"
+            )
+            return
+
+        status_message = await callback_query.message.edit_text(
+            "⏳ <b>Unsubscribing Current Account</b>\n\n"
+            "🔄 Processing...",
+            parse_mode="HTML"
+        )
+        await unsubscribe_everyone(token, status_message=status_message, bot=bot, chat_id=user_id)
+        return
+
+    elif data == "confirm_unsub_all":
+        active_tokens = get_active_tokens(user_id)
+        if not active_tokens:
+            await callback_query.message.edit_text(
+                "❌ No active accounts found.",
+                reply_markup=back_markup,
+                parse_mode="HTML"
+            )
+            return
+
+        status_message = await callback_query.message.edit_text(
+            f"⏳ <b>Unsubscribing All Accounts</b>\n\n"
+            f"📊 Processing {len(active_tokens)} accounts...",
+            parse_mode="HTML"
+        )
+
+        total_unsubscribed = 0
+        for i, token_obj in enumerate(active_tokens, 1):
+            await status_message.edit_text(
+                f"⏳ <b>Unsubscribing All Accounts</b>\n\n"
+                f"📊 Processing account {i}/{len(active_tokens)}: {token_obj['name']}",
+                parse_mode="HTML"
+            )
+            await unsubscribe_everyone(token_obj["token"])
+            total_unsubscribed += 1
+
+        await status_message.edit_text(
+            f"✅ <b>Unsubscribe Complete</b>\n\n"
+            f"Successfully unsubscribed {total_unsubscribed} accounts from all chatrooms.",
+            parse_mode="HTML"
+        )
+        return
 
     if data == "send_request_menu":
         await callback_query.message.edit_text(
@@ -731,11 +874,7 @@ async def callback_handler(callback_query: CallbackQuery):
         return
     
     elif data == "settings_menu":
-        current_username = get_user_session(user_id)
-        settings_text = "⚙️ <b>Settings Menu</b>\n\n"
-        if current_username:
-            settings_text += f"👤 Current profile: <code>{current_username}</code>\n\n"
-        settings_text += "Choose an option below:"
+        settings_text = "⚙️ <b>Settings Menu</b>\n\nChoose an option below:"
         
         await callback_query.message.edit_text(
             settings_text,
@@ -890,11 +1029,7 @@ async def callback_handler(callback_query: CallbackQuery):
         )
         
         # Refresh settings menu
-        current_username = get_user_session(user_id)
-        settings_text = "⚙️ <b>Settings Menu</b>\n\n"
-        if current_username:
-            settings_text += f"👤 Current profile: <code>{current_username}</code>\n\n"
-        settings_text += "Choose an option below:"
+        settings_text = "⚙️ <b>Settings Menu</b>\n\nChoose an option below:"
         
         await callback_query.message.edit_text(
             settings_text,
@@ -937,11 +1072,7 @@ async def callback_handler(callback_query: CallbackQuery):
         return
 
     elif data == "back_to_menu":
-        current_username = get_user_session(user_id)
-        welcome_text = "🎯 <b>Meeff Bot Dashboard</b>\n\n"
-        if current_username:
-            welcome_text += f"👤 Logged in as: <code>{current_username}</code>\n\n"
-        welcome_text += "Choose an option below to get started:"
+        welcome_text = "🎯 <b>Meeff Bot Dashboard</b>\n\nChoose an option below to get started:"
         
         await callback_query.message.edit_text(
             welcome_text,
